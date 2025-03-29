@@ -2,45 +2,42 @@
 
 #[macro_use]
 extern crate rocket;
-use rocket::serde::{json::Json, Deserialize};
+use rocket::serde::{json::Json, Deserialize, Serialize};
 use rocket::tokio::sync::broadcast;
 use rocket_ws as ws;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 #[serde(crate = "rocket::serde")]
-struct Heartbeat<'r> {
-    name: &'r str,
+struct Heartbeat {
+    username: String,
+    avatar_url: String,
+    editor: Option<String>,
+    language: Option<String>,
+    operating_system: Option<String>,
+    ip_address: String,
+    user_seconds_today: u64,
+    global_seconds_today: u64,
 }
 
 struct State {
-    tx: broadcast::Sender<String>,
+    tx: broadcast::Sender<Heartbeat>,
 }
 
 #[get("/echo")]
 fn echo_stream(ws: ws::WebSocket, state: &rocket::State<State>) -> ws::Stream!['static] {
-    // let ws = ws.config(ws::Config {
-    //     ..Default::default()
-    // });
-
     let mut r = state.tx.subscribe();
 
     ws::Stream! { ws =>
+        let _ = ws;
+
         while let Ok(hb) = r.recv().await {
-            yield ws::Message::Text(hb);
+            if let Ok(serialised) = serde_json::to_string(&hb) {
+                yield ws::Message::Text(serialised)
+            } else {
+                eprintln!("Couldn't serialise into json: {:?}", hb)
+            }
         }
     }
-
-    // ws::Stream! { ws =>
-    //     while let Ok(i) = r.recv().await {
-    //         let is = i.to_string();
-    //         yield is;
-    //         // println!("got = {}", i);
-    //     }
-
-    //     // for await message in ws {
-
-    //     // }
-    // }
 }
 
 #[get("/")]
@@ -49,10 +46,10 @@ fn hello() -> &'static str {
 }
 
 #[post("/heartbeat", data = "<hb>")]
-fn ingest_heartbeat(state: &rocket::State<State>, hb: Json<Heartbeat<'_>>) -> &'static str {
-    println!("hey, {:?}", hb.name);
+fn ingest_heartbeat(state: &rocket::State<State>, hb: Json<Heartbeat>) -> &'static str {
+    println!("hey, {:?}", hb);
 
-    let _ = state.tx.send(hb.name.to_string());
+    let _ = state.tx.send(hb.0);
 
     "Received"
 }
